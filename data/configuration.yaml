@@ -1,0 +1,11 @@
+homeassistant: true
+mqtt:
+  base_topic: ble2mqtt
+  server: 'mqtt://127.0.243.243:1883'
+controller:
+  address: B0:35:9F:CB:5B:1E
+devices:
+  '02:8f:dc:94:01:72':
+    type: am43
+  '02:94:a3:5f:1d:1d':
+    type: am43
