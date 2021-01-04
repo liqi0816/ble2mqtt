@@ -1,0 +1,13 @@
+[Unit]
+Description=A naive mimic of zigbee2mqtt for bluetooth with python
+After=network.target bluetooth.target
+
+[Service]
+Restart=on-failure
+RestartSec=20s
+DynamicUser=yes
+WorkingDirectory=/opt/ble2mqtt
+ExecStart=/opt/ble2mqtt/bin/python3 /opt/ble2mqtt/main.py
+
+[Install]
+WantedBy=multi-user.target
