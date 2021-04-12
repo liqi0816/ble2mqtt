@@ -137,7 +137,7 @@ class AM43(pyee.EventEmitter):
             'position_topic': device_topic,
             'set_position_topic': f'{device_topic}/set/position',
             'unique_id': self.identifier,
-            'value_template': '{{value_json["position"]}}',
+            'position_template': '{{value_json["position"]}}',
         }).encode('utf8'))
         await mqtt.publish(f'{homeassistant_discovery_topic}/sensor/{self.identifier}_battery/config', json.dumps({
             'availability': {
