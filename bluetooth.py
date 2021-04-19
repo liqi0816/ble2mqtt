@@ -81,9 +81,9 @@ class Client(bleak.BleakClient):
 
     async def send(self, char_specifier, data_array, response=False, retry=10):
         data = bytearray((*data_array, gen_checksum(data_array)))
-        for i in range(retry):
+        for _ in range(retry):
             try:
-                if not await self.is_connected():
+                if not self.is_connected:
                     await self.connect()
                 return await super().write_gatt_char(char_specifier=char_specifier, data=data, response=response)
             except bleak.exc.BleakError:
