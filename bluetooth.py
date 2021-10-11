@@ -1,6 +1,11 @@
+from __future__ import annotations
+import uuid
 import bleak
 import collections
+import collections.abc
 import asyncio
+import bleak.backends.characteristic
+import bleak.backends.bluezdbus.utils
 
 
 class Cache:
@@ -12,20 +17,18 @@ class Cache:
 
     def __init__(self, capacity: int = 6):
         self.capacity = capacity
-        self.queue = collections.OrderedDict()
+        self.queue: collections.OrderedDict[Client, None] = collections.OrderedDict()
         self.connecting_lock = asyncio.Lock()
 
 
 cache = Cache()
 
 
-def expand_uuid(uuid):
+def expand_uuid(uuid: str | int):
     return f'{uuid:0>8}-0000-1000-8000-00805f9b34fb'
 
 
-def gen_checksum(data):
-    if isinstance(data, str):
-        print(data)
+def gen_checksum(data: collections.abc.Iterable[int]):
     checksum = 0
     for byte in data:
         checksum ^= byte
@@ -33,6 +36,10 @@ def gen_checksum(data):
 
 
 class Client(bleak.BleakClient):
+    '''
+    A wrapper of bleak.BleakClient
+    '''
+
     def __init__(self, address: str, cache: Cache = cache):
         super().__init__(address)
         self.cache = cache
@@ -63,37 +70,53 @@ class Client(bleak.BleakClient):
             self.cache.queue[self] = None
             self.cache.queue.move_to_end(self, last=True)
             while len(self.cache.queue) > self.cache.capacity:
-                await self.cache.queue.popitem(last=False).disconnect()
-            for _ in range(10):
-                try:
-                    return await super().connect()
-                except bleak.BleakError as retry:
-                    if retry.args == ('org.bluez.Error.Failed: Software caused connection abort',):
-                        self.cache.connecting_lock.release()
-                        await asyncio.sleep(3)
-                        await self.cache.connecting_lock.acquire()
-                    else:
-                        raise
+                await self.cache.queue.popitem(last=False)[0].disconnect()
+            if not self.is_connected:
+                for _ in range(10):
+                    try:
+                        return await super().connect()
+                    except bleak.backends.bluezdbus.utils.BleakDBusError as dbus_error:
+                        if dbus_error.dbus_error == 'org.bluez.Error.Failed' and dbus_error.dbus_error_details == 'Software caused connection abort':
+                            print(f'<5>bluetooth.Client.connect retry dbus because: {dbus_error.dbus_error_details}')
+                            self.cache.connecting_lock.release()
+                            await asyncio.sleep(3)
+                            await self.cache.connecting_lock.acquire()
+                        else:
+                            raise
 
     async def disconnect(self):
         self.cache.queue.pop(self, None)
         return await super().disconnect()
 
-    async def send(self, char_specifier, data_array, response=False, retry=10):
+    async def send(
+        self,
+        char_specifier: bleak.backends.characteristic.BleakGATTCharacteristic | int | str | uuid.UUID,
+        data_array: collections.abc.Iterable[int],
+        response: bool = False,
+        retry: int = 10
+    ):
+        '''
+        send application data to the specified GATT characteristic.
+        checksum, connection limit and retry will be handled automatically.
+
+        data_array: an iterable yielding integers in range(256).
+        '''
         data = bytearray((*data_array, gen_checksum(data_array)))
         for _ in range(retry):
             try:
-                if not self.is_connected:
-                    await self.connect()
+                await self.connect()
                 return await super().write_gatt_char(char_specifier=char_specifier, data=data, response=response)
-            except bleak.exc.BleakError:
+            except bleak.BleakError as error:
+                print(f'<4>bluetooth.Client.send retry because:\n{error}')
                 await self.disconnect()
 
-    async def recv(self, char_specifier):
-        future = asyncio.Future()
-        future.add_done_callback(super().stop_notify, char_specifier)
+    async def recv(self, char_specifier: bleak.backends.characteristic.BleakGATTCharacteristic | int | str | uuid.UUID):
+        def stop_notify(_): super().stop_notify(char_specifier)
+        future: asyncio.Future[tuple[int, bytearray]] = asyncio.Future()
+        future.add_done_callback(stop_notify)
+        await self.connect()
         await super().start_notify(char_specifier, lambda sender, data: future.set_result((sender, data)))
-        return future
+        return await future
 
     async def __aenter__(self):
         assert await self.connect()

@@ -7,23 +7,21 @@ import bluetooth
 import importlib
 import contextlib
 import argparse
+from device.interface import BaseDevice
 
 
 @contextlib.asynccontextmanager
 async def get_devices_reg(configuration):
-    devices_reg = {}
+    devices_reg: dict[str, BaseDevice] = {}
     cache = bluetooth.Cache(configuration['controller'].get('capacity'))
-    try:
+    async with contextlib.AsyncExitStack() as stack:
         for address in configuration['devices']:
+            client = bluetooth.Client(address, cache)
             device_type = configuration['devices'][address]['type']
             device_config = configuration['devices'][address].get('config', {})
-            device = importlib.import_module(f'device.{device_type}').Device(address, cache, **device_config)
-            devices_reg[device.identifier] = device
-            if hasattr(device, 'init'):
-                await device.init()
+            device: BaseDevice = importlib.import_module(f'device.{device_type}').Device(client, **device_config)
+            devices_reg[device.identifier] = await stack.enter_async_context(device)
         yield devices_reg
-    finally:
-        await asyncio.gather(*(device.finalize() for device in devices_reg.values() if hasattr(device, 'finalize')))
 
 
 @contextlib.asynccontextmanager
@@ -40,21 +38,24 @@ async def get_mqtt(configuration):
     finally:
         await mqtt.disconnect()
 
-
 async def main():
     parser = argparse.ArgumentParser(description='A naive mimic of zigbee2mqtt for bluetooth with python')
     parser.add_argument('-c', '--config', default='config/configuration.yaml', help='configuration.yaml location')
     with open(parser.parse_args().config) as config:
         configuration = yaml.safe_load(config)
-    async with get_devices_reg(configuration) as devices_reg, get_mqtt(configuration) as mqtt:
         base_topic = configuration['mqtt']['base_topic']
-        await asyncio.gather(*(device.bindMQTT(mqtt=mqtt, device_topic=f'{base_topic}/{identifier}')
-                               for identifier, device in devices_reg.items()))
-        while True:
-            message = await mqtt.deliver_message()
-            base_topic, identifier, *topic = message.topic.split('/')
-            data = message.data.decode('utf8')
-            if identifier in devices_reg:
-                asyncio.create_task(devices_reg[identifier].handleMQTT(topic=topic, data=data))
+        homeassistant_discovery_topic='homeassistant'
+        async with get_devices_reg(configuration) as devices_reg, get_mqtt(configuration) as mqtt:
+            await asyncio.gather(*(device.bindMQTT(
+                mqtt=mqtt,
+                device_topic=f'{base_topic}/{identifier}',
+                homeassistant_discovery_topic=homeassistant_discovery_topic,
+            ) for identifier, device in devices_reg.items()))
+            while True:
+                message = await mqtt.deliver_message()
+                base_topic, identifier, *topic = message.topic.split('/')
+                data = message.data.decode('utf8')
+                if identifier in devices_reg:
+                    asyncio.create_task(devices_reg[identifier].handleMQTT(topic=topic, data=data))
 
 asyncio.run(main())

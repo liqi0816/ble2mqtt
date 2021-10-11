@@ -17,4 +17,4 @@ bash "$miniconda_tmp"/conda_scaffold.sh -b -p "$miniconda_tmp"/conda_dir
 
 ble2mqtt_opt_dir="${ble2mqtt_opt_dir:-/opt/ble2mqtt}"
 "$miniconda_tmp"/conda_dir/bin/conda create --yes --name ble2mqtt python="$python_version"
-"$miniconda_tmp"/conda_dir/envs/ble2mqtt/bin/pip install --upgrade bleak pyyaml hbmqtt furl pyee pip --target "$ble2mqtt_opt_dir" --no-cache-dir
+"$miniconda_tmp"/conda_dir/envs/ble2mqtt/bin/pip install --upgrade bleak pyyaml hbmqtt furl pyee pip websockets==8.1 --target "$ble2mqtt_opt_dir" --no-cache-dir

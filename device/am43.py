@@ -1,8 +1,9 @@
+from __future__ import annotations
 import asyncio
 import bluetooth
-import datetime
 import json
 import pyee
+# import datetime
 
 
 class AM43(pyee.EventEmitter):
@@ -18,11 +19,11 @@ class AM43(pyee.EventEmitter):
     }
     message_magic = 0x9a
 
-    def __init__(self, address, cache=None, identifier='', *, reverse=False):
+    def __init__(self, client: bluetooth.Client, identifier=''):
         super().__init__()
-        self.client = bluetooth.Client(address, cache)
-        self.identifier = identifier or f'am43_{address.replace(":", "").lower()}'
-        self.state = {
+        self.client = client
+        self.identifier = identifier or f'am43_{client.address.replace(":", "").lower()}'
+        self.state: dict[str, int | float | None] = {
             'battery': None,
             'illuminance': None,
             'position': None,
@@ -109,10 +110,16 @@ class AM43(pyee.EventEmitter):
             ]),
         )
 
-    async def bindMQTT(self, mqtt, device_topic, homeassistant_discovery_topic='homeassistant'):
+    async def bindMQTT(self, mqtt, device_topic, homeassistant_discovery_topic):
+        self.on('finalize', lambda state: asyncio.create_task(
+            mqtt.publish(f'{device_topic}/availability', 'offline'.encode('utf8'), retain=False)
+        ))
+        await mqtt.publish(f'{device_topic}/availability', 'online'.encode('utf8'), retain=False)
         self.on('statechange', lambda state: asyncio.create_task(
             mqtt.publish(device_topic, json.dumps(state).encode('utf8'))
         ))
+        await mqtt.publish(device_topic, json.dumps(self.state).encode('utf8'))
+
         device = {
             'connections': [['bluetooth', self.client.address]],
             'identifiers': self.identifier,
@@ -167,8 +174,6 @@ class AM43(pyee.EventEmitter):
             'unit_of_measurement': '%',
             'value_template': '{{value_json["illuminance"]}}',
         }).encode('utf8'))
-        await mqtt.publish(f'{device_topic}/availability', 'online'.encode('utf8'), retain=False)
-        await mqtt.publish(device_topic, json.dumps(self.state).encode('utf8'))
 
     async def handleMQTT(self, topic, data):
         if len(topic) > 0:
@@ -192,13 +197,12 @@ class AM43(pyee.EventEmitter):
                     items = {topic[1]: data}
                 else:
                     items = json.loads(data)
-                pass
 
     def __aenter__(self):
-        return self.open()
+        return self.init()
 
     def __aexit__(self, exc_type, exc_value, traceback):
-        return self.close()
+        return self.finalize()
 
 
 Device = AM43
