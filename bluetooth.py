@@ -6,7 +6,7 @@ import collections.abc
 import asyncio
 import bleak.backends.characteristic
 import bleak.backends.bluezdbus.utils
-
+import bleak.backends.service
 
 class Cache:
     """
@@ -74,6 +74,7 @@ class Client(bleak.BleakClient):
             if not self.is_connected:
                 for _ in range(10):
                     try:
+                        self.services = bleak.backends.service.BleakGATTServiceCollection()
                         return await super().connect()
                     except bleak.backends.bluezdbus.utils.BleakDBusError as dbus_error:
                         if dbus_error.dbus_error == 'org.bluez.Error.Failed' and dbus_error.dbus_error_details == 'Software caused connection abort':
