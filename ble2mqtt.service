@@ -3,7 +3,10 @@ Description=A naive mimic of zigbee2mqtt for bluetooth with python
 After=network.target bluetooth.target
 
 [Service]
-DynamicUser=yes
+# bluetooth depends on dbus so no DynamicUser
+# https://github.com/systemd/systemd/issues/9503
+User=nobody
+Group=nogroup
 BindReadOnlyPaths=/opt/ble2mqtt:/ble2mqtt
 BindReadOnlyPaths=/opt/ble2mqtt/config:/ble2mqtt/config
 WorkingDirectory=/ble2mqtt
