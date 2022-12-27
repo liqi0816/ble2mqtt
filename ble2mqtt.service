@@ -7,12 +7,19 @@ After=network.target bluetooth.target
 # https://github.com/systemd/systemd/issues/9503
 User=nobody
 Group=nogroup
-BindReadOnlyPaths=/opt/ble2mqtt:/ble2mqtt
-BindReadOnlyPaths=/opt/ble2mqtt/config:/ble2mqtt/config
-WorkingDirectory=/ble2mqtt
-ExecStart=/bin/python3 /ble2mqtt/main.py
+RuntimeDirectory=%n
+RootDirectory=%t/%n
+MountAPIVFS=yes
+PrivateTmp=yes
+BindPaths=/opt/ble2mqtt/app:/app
+BindReadOnlyPaths=/opt/ble2mqtt/conda:/conda
+BindReadOnlyPaths=/lib /lib32 /lib64 /bin /sbin
+BindPaths=/var/run/dbus
+WorkingDirectory=/app
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/conda/bin/python3 main.py
 Restart=on-failure
-RestartSec=20
+RestartSec=30
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target

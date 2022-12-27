@@ -8,6 +8,7 @@ import bleak.backends.characteristic
 import bleak.backends.bluezdbus.utils
 import bleak.backends.service
 
+
 class Cache:
     """
     BLE supports no more than 7/8 concurrent devices,
@@ -28,22 +29,14 @@ def expand_uuid(uuid: str | int):
     return f'{uuid:0>8}-0000-1000-8000-00805f9b34fb'
 
 
-def gen_checksum(data: collections.abc.Iterable[int]):
-    checksum = 0
-    for byte in data:
-        checksum ^= byte
-    return checksum
-
-
 class Client(bleak.BleakClient):
     '''
     A wrapper of bleak.BleakClient
     '''
 
     def __init__(self, address: str, cache: Cache = cache):
-        super().__init__(address)
+        super().__init__(address, disconnected_callback=lambda _: self.cache.queue.pop(self, None))
         self.cache = cache
-        self.set_disconnected_callback(lambda _: self.cache.queue.pop(self, None))
         self.connect_finalizer = None
 
     async def connect_finalizer_body(self):
@@ -58,7 +51,7 @@ class Client(bleak.BleakClient):
         """
         try:
             yield
-        except GeneratorExit:
+        finally:
             await self.disconnect()
 
     # first queue, then backend
@@ -74,11 +67,10 @@ class Client(bleak.BleakClient):
             if not self.is_connected:
                 for _ in range(10):
                     try:
-                        self.services = bleak.backends.service.BleakGATTServiceCollection()
                         return await super().connect()
                     except bleak.backends.bluezdbus.utils.BleakDBusError as dbus_error:
                         if dbus_error.dbus_error == 'org.bluez.Error.Failed' and dbus_error.dbus_error_details == 'Software caused connection abort':
-                            print(f'<5>bluetooth.Client.connect retry dbus because: {dbus_error.dbus_error_details}')
+                            print(f'<4>bluetooth.Client.connect retry dbus because: {dbus_error.dbus_error_details}')
                             self.cache.connecting_lock.release()
                             await asyncio.sleep(3)
                             await self.cache.connecting_lock.acquire()
@@ -87,22 +79,20 @@ class Client(bleak.BleakClient):
 
     async def disconnect(self):
         self.cache.queue.pop(self, None)
+        print(f'<5>bluetooth.Client disconnecting {self.address}')
         return await super().disconnect()
 
-    async def send(
-        self,
-        char_specifier: bleak.backends.characteristic.BleakGATTCharacteristic | int | str | uuid.UUID,
-        data_array: collections.abc.Iterable[int],
-        response: bool = False,
-        retry: int = 10
-    ):
+    async def send(self,
+                   char_specifier: bleak.backends.characteristic.BleakGATTCharacteristic | int | str | uuid.UUID,
+                   data: collections.abc.Iterable[int],
+                   response: bool = False,
+                   retry: int = 10):
         '''
         send application data to the specified GATT characteristic.
-        checksum, connection limit and retry will be handled automatically.
+        connection limit and retry will be handled automatically.
 
-        data_array: an iterable yielding integers in range(256).
+        data: an iterable yielding integers in range(256).
         '''
-        data = bytearray((*data_array, gen_checksum(data_array)))
         for _ in range(retry):
             try:
                 await self.connect()
@@ -112,7 +102,10 @@ class Client(bleak.BleakClient):
                 await self.disconnect()
 
     async def recv(self, char_specifier: bleak.backends.characteristic.BleakGATTCharacteristic | int | str | uuid.UUID):
-        def stop_notify(_): super().stop_notify(char_specifier)
+
+        def stop_notify(_):
+            super().stop_notify(char_specifier)
+
         future: asyncio.Future[tuple[int, bytearray]] = asyncio.Future()
         future.add_done_callback(stop_notify)
         await self.connect()

@@ -1,5 +1,4 @@
-from __future__ import annotations
-import hbmqtt.client
+import amqtt.client
 import abc
 
 
@@ -10,22 +9,23 @@ class BaseDevice(abc.ABC):
         raise NotImplementedError()
 
     @abc.abstractmethod
-    async def bindMQTTPublish(self, mqtt: hbmqtt.client.MQTTClient, device_topic: str, homeassistant_discovery_topic: str = None) -> None:
+    async def bindMQTT(self, mqtt: amqtt.client.MQTTClient, device_topic: str, homeassistant_discovery_topic: str = None) -> None:
         '''
-        bind the mqtt client for publishing state updates.
-        should not mqtt.subscribe here since it may be handled elsewhere.
-        if given homeassistant_discovery_topic, also setup homeassistant discovery.
+        Will be called once the mqtt client is ready.
+        Add `mqtt.publish` as a device notification listener here.
+        This function register all device->mqtt messages while `handleMQTT` register mqtt->device ones.
+        If homeassistant_discovery_topic is set, this function should also publish discovery message.
         '''
         raise NotImplementedError()
 
     @abc.abstractmethod
-    async def handleMQTTMessage(self, topic: list[str], data: str) -> None:
+    async def handleMQTT(self, topic: list[str], data: str) -> None:
         '''
-        handle incoming mqtt message.
-        topic is already split to parts.
-
-        for backward compability the implementation should try to accept two patterns:
-
+        Will be called when a message for this device arrives.
+        Call `bluetooth.send(command)` here.
+        `topic` is already a list of string.
+        This function register all mqtt->device messages while `bindMQTT` register device->mqtt ones.
+        For backward compability the implementation should try to accept two patterns:
             1. topic='set', data='{state:'OPEN'}'
             2. topic='set/state', data='OPEN'
         '''
@@ -34,14 +34,16 @@ class BaseDevice(abc.ABC):
     @abc.abstractmethod
     async def __aenter__(self) -> 'BaseDevice':
         '''
-        any initialization. not required method, but suggested.
+        Will be called right after __init__.
+        Async initializer.
         '''
         pass
 
     @abc.abstractmethod
     async def __aexit__(self, exc_type, exc_value, traceback):
         '''
-        any clean up. not required method, but suggested.
+        Will be called right after removal from device registry.
+        Async finalizer.
         '''
         pass
 
