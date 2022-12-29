@@ -1,22 +1,25 @@
-import yaml
-import asyncio
-import amqtt.mqtt.constants
-import amqtt.client
-import furl
-import bluetooth
-import importlib
-import contextlib
 import argparse
+import asyncio
+import contextlib
+import importlib
+import signal
+
+import amqtt.client
+import amqtt.mqtt.constants
+import furl
+import yaml
+
+import bluetooth
 from device.interface import BaseDevice
 
 
 @contextlib.asynccontextmanager
 async def get_devices_reg(configuration):
     devices_reg: dict[str, BaseDevice] = {}
-    cache = bluetooth.Cache(configuration['controller'].get('capacity'))
+    concurrency = bluetooth.Concurrency(configuration['controller'].get('capacity'))
     async with contextlib.AsyncExitStack() as stack:
         for address in configuration['devices']:
-            client = bluetooth.Client(address, cache)
+            client = bluetooth.Client(address, concurrency)
             device_type = configuration['devices'][address]['type']
             device_config = dict(configuration['devices'][address])
             device_config.pop('type')
@@ -65,4 +68,5 @@ async def main():
                     asyncio.create_task(devices_reg[identifier].handleMQTT(topic=topic, data=data))
 
 
+signal.signal(signal.SIGTERM, signal.getsignal(signal.SIGINT))
 asyncio.run(main())

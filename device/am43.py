@@ -2,12 +2,11 @@ from __future__ import annotations
 import asyncio
 import bluetooth
 import json
-import pyee
 import collections.abc
 import crypto
 
 
-class AM43(pyee.EventEmitter):
+class AM43(bluetooth.EventEmitter):
     CHAR_ID = {
         'state': bluetooth.expand_uuid('fe51'),
     }

@@ -5,6 +5,7 @@ from struct import pack, unpack
 from enum import IntEnum, Enum
 import itertools
 import typing
+import time
 
 # see https://github.com/redphx/poc-tuya-ble-fingerbot/blob/main/pyfingerbot/__init__.py
 # and
@@ -150,6 +151,12 @@ def create_pair_request(session: TuyaSession, uuid: bytes, device_id: bytes):
     ''' uuid: tuya{12-char-hex} device_id: {16-char-word} '''
     data = crypto.pad_to_multiple(uuid + session.login_key + device_id, 44)
     return create_message(session=session, code=TuyaCode.FUN_SENDER_PAIR, data=data, security_flag=5)
+
+
+def create_time_message(session: TuyaSession):
+    ''' WARN: this API supports a fixed timezone offset only, no DST '''
+    data = pack('>13sh', bytes(str(time.time_ns()), 'ascii'), -time.timezone // 36)
+    return create_message(session=session, code=TuyaCode.FUN_RECEIVE_TIME1_REQ, data=data, security_flag=5)
 
 
 def create_command_request(session: TuyaSession, commands: list):
