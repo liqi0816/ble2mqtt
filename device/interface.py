@@ -3,10 +3,27 @@ import abc
 
 
 class BaseDevice(abc.ABC):
+
     @property
     @abc.abstractmethod
     def identifier(self) -> str:
         raise NotImplementedError()
+
+    @abc.abstractmethod
+    async def __aenter__(self) -> 'BaseDevice':
+        '''
+        Will be called right after __init__.
+        Async initializer.
+        '''
+        pass
+
+    @abc.abstractmethod
+    async def __aexit__(self, exc_type, exc_value, traceback):
+        '''
+        Will be called right after removal from device registry.
+        Async finalizer.
+        '''
+        pass
 
     @abc.abstractmethod
     async def bindMQTT(self, mqtt: amqtt.client.MQTTClient, device_topic: str, homeassistant_discovery_topic: str = None) -> None:
@@ -30,22 +47,6 @@ class BaseDevice(abc.ABC):
             2. topic='set/state', data='OPEN'
         '''
         raise NotImplementedError()
-
-    @abc.abstractmethod
-    async def __aenter__(self) -> 'BaseDevice':
-        '''
-        Will be called right after __init__.
-        Async initializer.
-        '''
-        pass
-
-    @abc.abstractmethod
-    async def __aexit__(self, exc_type, exc_value, traceback):
-        '''
-        Will be called right after removal from device registry.
-        Async finalizer.
-        '''
-        pass
 
 
 Device = BaseDevice

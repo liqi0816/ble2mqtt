@@ -30,17 +30,16 @@ class AM43(pyee.EventEmitter):
             'position': None,
         }
 
-    async def init(self):
-        await self.client.connect()
+    async def __aenter__(self):
+        await self.client.__aenter__()
         await self.client.start_notify(AM43.CHAR_ID['state'], self.on_notify)
         await self.query()
         self.emit('init')
         return self
 
-    async def finalize(self):
-        await self.client.disconnect()
+    async def __aexit__(self, exc_type, exc_value, traceback):
+        await self.client.__aexit__(exc_type, exc_value, traceback)
         self.emit('finalize')
-        return self
 
     def on_notify(self, sender: int, data: bytearray):
         try:
@@ -100,7 +99,7 @@ class AM43(pyee.EventEmitter):
         )
 
     async def bindMQTT(self, mqtt, device_topic, homeassistant_discovery_topic):
-        self.on('finalize', lambda state: asyncio.create_task(mqtt.publish(f'{device_topic}/availability', 'offline'.encode('utf8'), retain=False)))
+        self.on('finalize', lambda: asyncio.create_task(mqtt.publish(f'{device_topic}/availability', 'offline'.encode('utf8'), retain=False)))
         await mqtt.publish(f'{device_topic}/availability', 'online'.encode('utf8'), retain=False)
         self.on('statechange', lambda state: asyncio.create_task(mqtt.publish(device_topic, json.dumps(state).encode('utf8'))))
         await mqtt.publish(device_topic, json.dumps(self.state).encode('utf8'))
@@ -188,12 +187,6 @@ class AM43(pyee.EventEmitter):
                     items = {topic[1]: data}
                 else:
                     items = json.loads(data)
-
-    def __aenter__(self):
-        return self.init()
-
-    def __aexit__(self, exc_type, exc_value, traceback):
-        return self.finalize()
 
 
 Device = AM43

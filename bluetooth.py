@@ -9,9 +9,13 @@ import bleak.backends.bluezdbus.utils
 import bleak.backends.service
 
 
+def expand_uuid(uuid: str | int):
+    return f'{uuid:0>8}-0000-1000-8000-00805f9b34fb'
+
+
 class Cache:
     """
-    BLE supports no more than 7/8 concurrent devices,
+    BLE supports no more than 7 concurrent devices,
     and disconnect/connect incurs 1 second delay each.
     This is an LRU cache.
     """
@@ -19,14 +23,10 @@ class Cache:
     def __init__(self, capacity: int = 6):
         self.capacity = capacity
         self.queue: collections.OrderedDict[Client, None] = collections.OrderedDict()
-        self.connecting_lock = asyncio.Lock()
+        self.lock = asyncio.Lock()
 
 
 cache = Cache()
-
-
-def expand_uuid(uuid: str | int):
-    return f'{uuid:0>8}-0000-1000-8000-00805f9b34fb'
 
 
 class Client(bleak.BleakClient):
@@ -35,7 +35,12 @@ class Client(bleak.BleakClient):
     '''
 
     def __init__(self, address: str, cache: Cache = cache):
-        super().__init__(address, disconnected_callback=lambda _: self.cache.queue.pop(self, None))
+
+        def disconnected_callback(_):
+            print(f'<5>bluetooth.Client.disconnected_callback {self.address}')
+            self.cache.queue.pop(self, None)
+
+        super().__init__(address, disconnected_callback=disconnected_callback)
         self.cache = cache
         self.connect_finalizer = None
 
@@ -56,7 +61,7 @@ class Client(bleak.BleakClient):
 
     # first queue, then backend
     async def connect(self):
-        async with self.cache.connecting_lock:
+        async with self.cache.lock:
             if not self.connect_finalizer:
                 self.connect_finalizer = self.connect_finalizer_body()
                 await self.connect_finalizer.__anext__()
@@ -68,19 +73,19 @@ class Client(bleak.BleakClient):
                 for _ in range(10):
                     try:
                         return await super().connect()
-                    except bleak.backends.bluezdbus.utils.BleakDBusError as dbus_error:
-                        if dbus_error.dbus_error == 'org.bluez.Error.Failed' and dbus_error.dbus_error_details == 'Software caused connection abort':
-                            print(f'<4>bluetooth.Client.connect retry dbus because: {dbus_error.dbus_error_details}')
-                            self.cache.connecting_lock.release()
+                    except bleak.exc.BleakDBusError as error:
+                        if error.dbus_error == 'org.bluez.Error.Failed' and error.dbus_error_details == 'le-connection-abort-by-local':
+                            print(f'<4>bluetooth.Client.connect {self.address} retry because dbus: {error.dbus_error_details}')
+                            self.cache.lock.release()
                             await asyncio.sleep(3)
-                            await self.cache.connecting_lock.acquire()
+                            await self.cache.lock.acquire()
                         else:
                             raise
-
-    async def disconnect(self):
-        self.cache.queue.pop(self, None)
-        print(f'<5>bluetooth.Client disconnecting {self.address}')
-        return await super().disconnect()
+                    except bleak.exc.BleakDeviceNotFoundError as error:
+                        await bleak.BleakScanner.find_device_by_address(error.identifier)
+                        self.cache.lock.release()
+                        await asyncio.sleep(3)
+                        await self.cache.lock.acquire()
 
     async def send(self,
                    char_specifier: bleak.backends.characteristic.BleakGATTCharacteristic | int | str | uuid.UUID,
@@ -98,22 +103,20 @@ class Client(bleak.BleakClient):
                 await self.connect()
                 return await super().write_gatt_char(char_specifier=char_specifier, data=data, response=response)
             except bleak.BleakError as error:
-                print(f'<4>bluetooth.Client.send retry because:\n{error}')
+                print(f'<4>bluetooth.Client.send {self.address} retry because: {error}')
                 await self.disconnect()
 
     async def recv(self, char_specifier: bleak.backends.characteristic.BleakGATTCharacteristic | int | str | uuid.UUID):
-
-        def stop_notify(_):
-            super().stop_notify(char_specifier)
-
         future: asyncio.Future[tuple[int, bytearray]] = asyncio.Future()
-        future.add_done_callback(stop_notify)
+        future.add_done_callback(lambda _: super().stop_notify(char_specifier))
         await self.connect()
         await super().start_notify(char_specifier, lambda sender, data: future.set_result((sender, data)))
         return await future
 
-    async def __aenter__(self):
-        assert await self.connect()
-
-    async def __aexit__(self, exc_type, exc_value, traceback):
-        assert await self.disconnect()
+    async def start_notify_stream(self, char_specifier: bleak.backends.characteristic.BleakGATTCharacteristic | int | str | uuid.UUID, **kwargs):
+        loop = asyncio.get_event_loop()
+        queue = asyncio.Queue()
+        asyncio.create_task(super().start_notify(char_specifier, lambda sender, data: loop.call_soon_threadsafe(queue.put_nowait, (sender, data)),
+                                                 **kwargs))
+        while True:
+            yield await queue.get()

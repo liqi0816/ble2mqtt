@@ -29,15 +29,19 @@ async def get_devices_reg(configuration):
 async def get_mqtt(configuration):
     mqtt = amqtt.client.MQTTClient(client_id=configuration['mqtt'].get('client_id'), config={'default_retain': True})
     try:
-        await mqtt.connect(furl.furl(configuration['mqtt']['server']).set(
-            username=str(configuration['mqtt'].get('user')),
-            password=str(configuration['mqtt'].get('password')),
-        ).url)
+        await mqtt.connect(
+            furl.furl(configuration['mqtt']['server']).set(
+                username=str(configuration['mqtt'].get('user')),
+                password=str(configuration['mqtt'].get('password')),
+            ).url)
         base_topic = configuration['mqtt']['base_topic']
         await mqtt.subscribe([(f'{base_topic}/#', amqtt.mqtt.constants.QOS_0)])
         yield mqtt
     finally:
+        # for any will messages
+        await asyncio.sleep(1)
         await mqtt.disconnect()
+
 
 async def main():
     parser = argparse.ArgumentParser(description='A naive mimic of zigbee2mqtt for bluetooth with python')
@@ -45,8 +49,9 @@ async def main():
     with open(parser.parse_args().config) as config:
         configuration = yaml.safe_load(config)
         base_topic = configuration['mqtt']['base_topic']
-        homeassistant_discovery_topic='homeassistant'
-        async with get_devices_reg(configuration) as devices_reg, get_mqtt(configuration) as mqtt:
+        homeassistant_discovery_topic = 'homeassistant'
+        async with get_mqtt(configuration) as mqtt, get_devices_reg(configuration) as devices_reg:
+            print(f'<6>initialized with {len(devices_reg)} devices')
             await asyncio.gather(*(device.bindMQTT(
                 mqtt=mqtt,
                 device_topic=f'{base_topic}/{identifier}',
@@ -58,5 +63,6 @@ async def main():
                 data = message.data.decode('utf8')
                 if identifier in devices_reg:
                     asyncio.create_task(devices_reg[identifier].handleMQTT(topic=topic, data=data))
+
 
 asyncio.run(main())

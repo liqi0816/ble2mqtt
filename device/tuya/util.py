@@ -1,12 +1,10 @@
-import queue
 import crypto
 import hashlib
-import secrets
 from Crypto.Cipher import AES
 from struct import pack, unpack
 from enum import IntEnum, Enum
 import itertools
-import asyncio
+import typing
 
 # see https://github.com/redphx/poc-tuya-ble-fingerbot/blob/main/pyfingerbot/__init__.py
 # and
@@ -30,42 +28,28 @@ class TuyaDataType(IntEnum):
     ENUM = 4
 
 
-class Readable:
-    ''' Warning: this is a bare minimal impl and supports only one reader '''
-
-    def __init__(self) -> None:
-        self.queue = queue.SimpleQueue()
-        self.last = asyncio.Future()
-        self.queue.put(self.last)
-
-    def __aiter__(self):
-        return self
-
-    def __anext__(self):
-        return self.queue.get()
-
-    def push(self, chunk):
-        self.last.set_result(chunk)
-        self.last = asyncio.Future()
-        self.queue.put(self.last)
-
-
 class TuyaSession():
 
     def __init__(self, local_key: str) -> None:
         self.login_key = local_key[0:6].encode('ascii')
+        self.sn_counter = itertools.count(1)
         self.keys = {4: hashlib.md5(self.login_key).digest()}
 
     def __getitem__(self, data: int) -> bytes:
         return self.keys[data]
 
+    def is_ready(self):
+        return 5 in self.keys
+
     def set_srand(self, srand: bytes):
         self.keys[5] = hashlib.md5(self.login_key + srand).digest()
 
-def create_message(sn: int, ack_sn: int, code: int, data: bytes, session: TuyaSession, security_flag: int):
-    header = pack('>IIHH', sn, ack_sn, code, len(data))
+
+def create_message(session: TuyaSession, code: int, data: bytes, security_flag: int = 5, ack_sn: int = 0):
+    header = pack('>IIHH', next(session.sn_counter), ack_sn, code, len(data))
     footer = pack('>H', crypto.calc_crc16_modbus(header + data))
     cleartext = crypto.pad_to_multiple(header + data + footer, 16)
+    print(f'<7>create_message {cleartext.hex("-")}')
     security_flag_byte = pack('>B', security_flag)
     iv = crypto.get_random_iv()
     encrypted = AES.new(session[security_flag], AES.MODE_CBC, iv).encrypt(cleartext)
@@ -97,7 +81,12 @@ def read_varint(data: bytes, offset: int):
     return ret, i
 
 
-async def merge_packets(stream: Readable):
+async def map_stream(stream, func):
+    async for packet in stream:
+        yield func(packet)
+
+
+async def merge_packets(stream: typing.AsyncGenerator[bytes, None]):
     message_length = None
     last_packet_number = None
     buffer = None
@@ -142,10 +131,10 @@ def parse_message(message: bytes, session: TuyaSession, update_session=True):
     data = cleartext[12:12 + length]
     ret = {'code': code, 'data': data}
     try:
-        code = TuyaCode(code)
+        ret['code'] = TuyaCode(code)
     except ValueError:
         pass
-    if code == TuyaCode.FUN_SENDER_DEVICE_INFO:
+    if ret['code'] == TuyaCode.FUN_SENDER_DEVICE_INFO:
         ret |= parse_device_info(data)
         if update_session:
             session.set_srand(ret['srand'])
@@ -153,17 +142,17 @@ def parse_message(message: bytes, session: TuyaSession, update_session=True):
     return ret
 
 
-def create_device_info_request(sn: int, session: TuyaSession):
-    return create_message(sn=sn, ack_sn=0, code=TuyaCode.FUN_SENDER_DEVICE_INFO, data=bytes(), session=session, security_flag=4)
+def create_device_info_request(session: TuyaSession):
+    return create_message(session=session, code=TuyaCode.FUN_SENDER_DEVICE_INFO, data=bytes(), security_flag=4)
 
 
-def create_pair_request(sn: int, session: TuyaSession, uuid: bytes, device_id: bytes):
+def create_pair_request(session: TuyaSession, uuid: bytes, device_id: bytes):
     ''' uuid: tuya{12-char-hex} device_id: {16-char-word} '''
     data = crypto.pad_to_multiple(uuid + session.login_key + device_id, 44)
-    return create_message(sn=sn, ack_sn=0, code=TuyaCode.FUN_SENDER_PAIR, data=data, session=session, security_flag=5)
+    return create_message(session=session, code=TuyaCode.FUN_SENDER_PAIR, data=data, security_flag=5)
 
 
-def create_command_request(sn: int, session: TuyaSession, commands: list):
+def create_command_request(session: TuyaSession, commands: list):
     data = bytearray()
     for key, value, in commands:
         data += pack('>B', int(key))
@@ -177,4 +166,4 @@ def create_command_request(sn: int, session: TuyaSession, commands: list):
             data += pack('>BBB', TuyaDataType.ENUM, 1, int(value))
         elif type(value) == bytes:
             data += value
-    return create_message(sn=sn, ack_sn=0, code=TuyaCode.FUN_SENDER_DPS, data=data, session=session, security_flag=5)
+    return create_message(session=session, code=TuyaCode.FUN_SENDER_DPS, data=data, security_flag=5)
