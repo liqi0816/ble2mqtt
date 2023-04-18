@@ -11,12 +11,12 @@ developer: [device readme](./device/README.md)
 # Try it out!
 ## Prerequisite
 
-ble2mqtt is tested with Python 3.9. It should support newer versions but I didn't test. You will also need git.
+ble2mqtt is tested with Python 3.9 and 3.10. You will also need git.
 
 ## Install dependencies
 
 ```bash
-pip3 install --upgrade bleak==0.19.5 PyYAML==5.4.1 amqtt==0.10.1 furl==2.1.3 pyee==9.0.4 pycryptodome==3.16.0
+pip install --upgrade bleak==0.20.1 PyYAML==6.0 'amqtt>=0.11.0b1' furl==2.1.3 pyee==9.0.4 pycryptodome==3.17
 ```
 
 ## Clone the repository
