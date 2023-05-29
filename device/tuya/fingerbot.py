@@ -110,6 +110,8 @@ class TuyaFingerBot(bluetooth.EventEmitter):
     async def handleMQTT(self, topic: list[str], data: str) -> None:
         if topic == ['set', 'action'] and data != None:
             return await self.press()
+        elif topic == ['ping'] and data != None:
+            return await self.sync_session()
 
 
 Device = TuyaFingerBot
