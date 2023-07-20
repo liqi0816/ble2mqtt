@@ -160,7 +160,7 @@ class AM43(bluetooth.EventEmitter):
                 'name': f'{device["name"]} illuminance',
                 'state_topic': device_topic,
                 'unique_id': f'{self.identifier}_illuminance',
-                'unit_of_measurement': '%',
+                'unit_of_measurement': 'lx',
                 'value_template': '{{value_json["illuminance"]}}',
             }).encode('utf8'))
 
